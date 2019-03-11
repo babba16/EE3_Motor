@@ -37,14 +37,23 @@ State   L1  L2  L3
 6       -   -   -
 7       -   -   -
 */
+
 /* Mail */
 typedef struct {
   uint32_t nonce;
 } mail_t;
-
+Mutex newKey_mutex;
 Mail<mail_t, 16> mail_box;
 
 Thread thread;
+
+//Initialise the serial port
+RawSerial pc(SERIAL_TX, SERIAL_RX);
+Queue<void,8> inCharQ;
+void serialISR(){
+        uint8_t newChar = pc.getc();
+        inCharQ.put((void*)newChar);
+ }  
 
 void send_thread (uint32_t nonceVal) {
         
@@ -55,6 +64,7 @@ void send_thread (uint32_t nonceVal) {
         wait(1);
     
 }
+
 void print_thread (void) {
     while(true){
         osEvent evt = mail_box.get();
@@ -65,7 +75,30 @@ void print_thread (void) {
             
         }
     }    
-}    
+}
+
+uint64_t newKey; 
+
+void decode_thread(){
+    char* cmdIn = new char[20];
+    int  n = 0;
+    pc.attach(&serialISR);
+    while(1) {
+        osEvent newEvent = inCharQ.get();
+        uint8_t newChar = (uint8_t)newEvent.value.p;
+        if (newChar != '\r'){
+            cmdIn[n] = newChar;
+            n++;
+        }
+        else {
+            n = 0;
+            newKey_mutex.lock();
+            sscanf(cmdIn,"K%llx",&newKey);
+            newKey_mutex.unlock(); 
+                   
+        }
+    }
+}      
 //Drive state to output table
 const int8_t driveTable[] = {0x12,0x18,0x09,0x21,0x24,0x06,0x00,0x00};
 
@@ -136,15 +169,14 @@ void spinRotor(){
     motorOut((intState-orState+lead+6)%6); //+6 to make sure the remainder is positive
             //pc.printf("%d\n\r",intState);
 }
-    
+   
 //Main
 int main() {
     int8_t orState = 0;    //Rotot offset at motor state 0
     int8_t intState = 0;
     int8_t intStateOld = 0;
     
-    //Initialise the serial port
-    Serial pc(SERIAL_TX, SERIAL_RX);
+    
     pc.printf("Hello\n\r");
     
     //Run the motor synchronisation
@@ -165,8 +197,7 @@ int main() {
     float timePassed;
     float hashcount;
     float hashRate;
-    
-    
+    thread.start(callback(decode_thread));
     uint8_t sequence[] = {0x45,0x6D,0x62,0x65,0x64,0x64,0x65,0x64,
         0x20,0x53,0x79,0x73,0x74,0x65,0x6D,0x73,
         0x20,0x61,0x72,0x65,0x20,0x66,0x75,0x6E,
@@ -184,6 +215,9 @@ int main() {
     //Poll the rotor state and set the motor outputs accordingly to spin the motor
     while (1) {
             sha.computeHash(hash,sequence,64);
+            
+            (*key)= newKey;
+            
             if ((hash[0] == 0) && (hash[1] == 0)){
                     
                     uint32_t nonceVal = (uint32_t) *nonce;
