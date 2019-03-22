@@ -43,7 +43,6 @@ State   L1  L2  L3
 6       -   -   -
 7       -   -   -
 */
-#define testpin D13
 
 
 PwmOut motor(D9);
@@ -70,10 +69,10 @@ Timer timer;
 Timer velocityTime;
 
 uint32_t nonceVal;
-float duty;
+volatile float duty;
 float hashRate;
 float hashCount;
-uint64_t newKey = 0;
+volatile uint64_t newKey = 0;
 int8_t intState = 0;
 int8_t intStateOld = 0;
 int errorInState =0;
@@ -82,7 +81,7 @@ float velocity;
 int8_t position;
 float maxVelocity = 0.0;
 float maxRotations = 0.0;
-float torque;
+volatile float torque;
 //-----Melody Variables -----//
 float period_out = 2000.0;
 int duration[8];
@@ -124,7 +123,6 @@ DigitalOut L2L(L2Lpin);
 DigitalOut L2H(L2Hpin);
 DigitalOut L3L(L3Lpin);
 DigitalOut L3H(L3Hpin);
-DigitalOut TP(testpin);
 
 //Set a given drive state
 void motorOut(int8_t driveState)
@@ -352,7 +350,6 @@ void executeCommand(char* command)
 void print_thread (void)
 {
     while(true) {
-        TP=1;
         osEvent evt = mail_box.get();
         if (evt.status == osEventMail) {
             mail_t *mail = (mail_t*)evt.value.p;
@@ -385,14 +382,11 @@ void print_thread (void)
                     pc.printf("Rotations to be done: %f\n\r", maxRotations);
                     break;
                 case 7:
-                    pc.printf("Melody to be played: %s\n\r", melody_string);
+                    pc.printf("Melody to be player: %s\n\r", melody_string);
                     break;
             }
             mail_box.free(mail);
         }
-        
-         TP=0;
-       wait(0.0000005);
        }
 }
 
@@ -424,7 +418,6 @@ void motorCtrlTick()
 
 void motorCtrlFn(void)
 {
-    TP = 1;
     counterRev = 0;
     Ticker motorCtrlTicker;
     motorCtrlTicker.attach_us(&motorCtrlTick,100000);
@@ -448,17 +441,20 @@ void motorCtrlFn(void)
     while(1) {
         velocityTime.start();
         motorCtrlT.signal_wait(0x1);
+        revs = counterRev/6.0;
+        revChange = revs - oldRevs;
+        velocity = revChange * 10.0;
+        oldRevs = revs;
+        
         if(counter == 10) {
-            core_util_critical_section_enter();
-            revs = counterRev/6.0;
-            revChange = revs - oldRevs;
-            float timePassed = velocityTime.read();
-            velocity = revChange/timePassed;                          // we have velocity every second
-            //pc.printf("time passed: %f\n\r", timePassed);
+            //core_util_critical_section_enter();
+            
+                                 // we have velocity every second
+            sendToMail(4);
             counter = 0;
-            velocityTime.reset();
-            core_util_critical_section_exit();
-            oldRevs = revs;
+            //velocityTime.reset();
+            //core_util_critical_section_exit();
+            //oldRevs = revs;
         }
         //vel control
 
@@ -538,7 +534,6 @@ void motorCtrlFn(void)
 
         counter++;
         //printf ("rrs rev: %i\n\r", intState);
-         TP = 0;
     }
    
 
@@ -571,7 +566,7 @@ void playMelody(float freq, int duration)
 {
     for(int i = 0; i < duration - 1; i++) {
         period_out = (1000000/freq);
-        motor=0.5;
+        //motor=0.5;
         motor.period_us(period_out);
         newPhISR();
         wait(1);
@@ -602,9 +597,9 @@ int main()
 
     SHA256 sha;
     timer.start();
-   //
-   decodeThread.start(callback(decode_thread));
-    //melodyThread.start(callback(parse_melody));
+   
+    decodeThread.start(callback(decode_thread));
+    melodyThread.start(callback(parse_melody));
 
     uint8_t sequence[] = {0x45,0x6D,0x62,0x65,0x64,0x64,0x65,0x64,
                           0x20,0x53,0x79,0x73,0x74,0x65,0x6D,0x73,
@@ -619,8 +614,8 @@ int main()
     uint64_t* nonce = (uint64_t*)((int)sequence + 56);
     uint8_t hash[32];
 
-     printThread.start(callback(print_thread));
-   // motorCtrlT.start(callback(motorCtrlFn));
+    printThread.start(callback(print_thread));
+    motorCtrlT.start(callback(motorCtrlFn));
 
     //Poll the rotor state and set the motor outputs accordingly to spin the motor
     while (1) {
