@@ -385,7 +385,7 @@ void print_thread (void)
                     pc.printf("Rotations to be done: %f\n\r", maxRotations);
                     break;
                 case 7:
-                    pc.printf("Melody to be player: %s\n\r", melody_string);
+                    pc.printf("Melody to be played: %s\n\r", melody_string);
                     break;
             }
             mail_box.free(mail);
